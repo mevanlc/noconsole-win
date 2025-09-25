@@ -39,7 +39,7 @@ namespace noconsole
             {
                 lpCommandLine.Insert(0, prefix);
             }
-            //MessageBox.Show(lpCommandLine.ToString(), "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            //MessageBoxError(lpCommandLine.ToString());
             //Environment.Exit(0);
             bool success = NativeMethods.CreateProcess(lpApplicationName,
                 lpCommandLine,
