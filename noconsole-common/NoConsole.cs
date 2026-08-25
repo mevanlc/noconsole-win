@@ -23,8 +23,8 @@ namespace noconsole
                 MessageBoxError(usage);
                 Environment.Exit(1);
             }
-            STARTUPINFO si = new STARTUPINFO();
-            PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+            NativeStructs.STARTUPINFO si = new NativeStructs.STARTUPINFO();
+            NativeStructs.PROCESS_INFORMATION pi = new NativeStructs.PROCESS_INFORMATION();
             si.cb = Marshal.SizeOf(si);
 
             string lpApplicationName = null;
@@ -32,15 +32,29 @@ namespace noconsole
             IntPtr lpProcessAttributes = IntPtr.Zero;
             IntPtr lpThreadAttributes = IntPtr.Zero;
             bool bInheritHandles = false;
-            uint dwCreationFlags = noWindow ? NativeMethods.CREATE_NO_WINDOW : 0;
+            uint dwCreationFlags = noWindow ? NativeConstants.CREATE_NO_WINDOW : 0;
             IntPtr lpEnvironment = IntPtr.Zero;
             string lpCurrentDirectory = null;
             if (prefix != null)
             {
                 lpCommandLine.Insert(0, prefix);
             }
-            //MessageBoxError(lpCommandLine.ToString());
-            //Environment.Exit(0);
+            if (Environment.GetEnvironmentVariable("NOCONSOLE_DEBUG") == "1")
+            {
+                string debugMessage = lpCommandLine.ToString();
+                try
+                {
+                    NativeClipboard.SetClipboardText(debugMessage);
+                    debugMessage += "\n\nThe command line was copied to the clipboard.";
+                }
+                catch (Exception exception)
+                {
+                    debugMessage += "\n\nThe command line could not be copied to the clipboard:\n"
+                        + exception.Message;
+                }
+
+                MessageBoxInfo(debugMessage);
+            }
             bool success = NativeMethods.CreateProcess(lpApplicationName,
                 lpCommandLine,
                 lpProcessAttributes,
@@ -56,6 +70,9 @@ namespace noconsole
                 MessageBoxError("CreateProcess failed: " + Marshal.GetLastWin32Error());
                 Environment.Exit(1);
             }
+
+            NativeMethods.CloseHandle(pi.hThread);
+            NativeMethods.CloseHandle(pi.hProcess);
         }
 
         public static void MessageBoxInfo(string message)

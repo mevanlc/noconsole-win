@@ -1,39 +1,48 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace noconsole
 {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct STARTUPINFO
+    public static class NativeStructs
     {
-        public Int32 cb;
-        public string lpReserved;
-        public string lpDesktop;
-        public string lpTitle;
-        public Int32 dwX;
-        public Int32 dwY;
-        public Int32 dwXSize;
-        public Int32 dwYSize;
-        public Int32 dwXCountChars;
-        public Int32 dwYCountChars;
-        public Int32 dwFillAttribute;
-        public Int32 dwFlags;
-        public Int16 wShowWindow;
-        public Int16 cbReserved2;
-        public IntPtr lpReserved2;
-        public IntPtr hStdInput;
-        public IntPtr hStdOutput;
-        public IntPtr hStdError;
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct STARTUPINFO
+        {
+            public Int32 cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public Int32 dwX;
+            public Int32 dwY;
+            public Int32 dwXSize;
+            public Int32 dwYSize;
+            public Int32 dwXCountChars;
+            public Int32 dwYCountChars;
+            public Int32 dwFillAttribute;
+            public Int32 dwFlags;
+            public Int16 wShowWindow;
+            public Int16 cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct PROCESS_INFORMATION
+    public static class NativeConstants
     {
-        public IntPtr hProcess;
-        public IntPtr hThread;
-        public int dwProcessId;
-        public int dwThreadId;
+        public const uint CREATE_NO_WINDOW = 0x08000000;
     }
 
     /// <summary>
@@ -41,18 +50,6 @@ namespace noconsole
     /// </summary>
     public static class NativeMethods
     {
-        #region Constants
-
-        public static readonly IntPtr NullPtr = IntPtr.Zero;
-        public static readonly IntPtr InvalidIntPtr = new IntPtr(-1);
-
-        public const uint NORMAL_PRIORITY_CLASS = 0x0020;
-        public const uint CREATE_NO_WINDOW = 0x08000000;
-        public const Int32 STARTF_USESTDHANDLES = 0x00000100;
-        public const int ERROR_SUCCESS = 0;
-
-        #endregion
-
         //------------------------------------------------------------------------------
         // CloseHandle
         //------------------------------------------------------------------------------
@@ -76,8 +73,8 @@ namespace noconsole
             uint dwCreationFlags,
             IntPtr lpEnvironment,
             string lpCurrentDirectory,
-            [In] ref STARTUPINFO lpStartupInfo,
-            out PROCESS_INFORMATION lpProcessInformation
+            [In] ref NativeStructs.STARTUPINFO lpStartupInfo,
+            out NativeStructs.PROCESS_INFORMATION lpProcessInformation
         );
 
         //------------------------------------------------------------------------------
@@ -85,7 +82,119 @@ namespace noconsole
         //------------------------------------------------------------------------------
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr GetCommandLine();
+    }
 
+    public static class NativeClipboard
+    {
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalFree(IntPtr hMem);
+
+        private const uint CF_UNICODETEXT = 13;
+        private const uint GMEM_MOVEABLE = 0x0002;
+        private const uint GMEM_ZEROINIT = 0x0040;
+
+        public static void SetClipboardText(string text)
+        {
+            if (text == null)
+            {
+                throw new ArgumentNullException("text");
+            }
+
+            if (!OpenClipboard(IntPtr.Zero))
+            {
+                ThrowLastWin32Error("OpenClipboard");
+            }
+
+            IntPtr hGlobal = IntPtr.Zero;
+            try
+            {
+                if (!EmptyClipboard())
+                {
+                    ThrowLastWin32Error("EmptyClipboard");
+                }
+
+                byte[] textBytes = Encoding.Unicode.GetBytes(text + "\0");
+                hGlobal = GlobalAlloc(
+                    GMEM_MOVEABLE | GMEM_ZEROINIT,
+                    new UIntPtr((uint)textBytes.Length));
+
+                if (hGlobal == IntPtr.Zero)
+                {
+                    throw new OutOfMemoryException("GlobalAlloc failed while preparing clipboard data.");
+                }
+
+                IntPtr pGlobal = GlobalLock(hGlobal);
+                if (pGlobal == IntPtr.Zero)
+                {
+                    ThrowLastWin32Error("GlobalLock");
+                }
+
+                try
+                {
+                    Marshal.Copy(textBytes, 0, pGlobal, textBytes.Length);
+                }
+                finally
+                {
+                    if (!GlobalUnlock(hGlobal))
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error != 0)
+                        {
+                            throw new Win32Exception(error, "GlobalUnlock failed.");
+                        }
+                    }
+                }
+
+                if (SetClipboardData(CF_UNICODETEXT, hGlobal) == IntPtr.Zero)
+                {
+                    ThrowLastWin32Error("SetClipboardData");
+                }
+
+                // The system owns the memory after SetClipboardData succeeds.
+                hGlobal = IntPtr.Zero;
+            }
+            finally
+            {
+                if (hGlobal != IntPtr.Zero)
+                {
+                    GlobalFree(hGlobal);
+                }
+
+                CloseClipboard();
+            }
+        }
+
+        private static void ThrowLastWin32Error(string operation)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                operation + " failed.");
+        }
     }
 
     public static class NativeMessageBox
